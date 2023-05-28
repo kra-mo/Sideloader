@@ -18,6 +18,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import sys
+from pathlib import Path
+from time import sleep
 
 import gi
 
@@ -25,7 +27,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
 # pylint: disable=wrong-import-order, wrong-import-position
-from gi.repository import Adw, Gio
+from gi.repository import Adw, Gio, GLib, Gtk
 
 from .window import SideloaderWindow
 
@@ -33,14 +35,32 @@ from .window import SideloaderWindow
 class SideloaderApplication(Adw.Application):
     """The main application singleton class."""
 
+    win = None
+
     def __init__(self):
         super().__init__(
             application_id="org.vanillaos.Sideloader",
             flags=Gio.ApplicationFlags.DEFAULT_FLAGS,
         )
         self.create_action("quit", lambda *_: self.quit(), ["<primary>q"])
-        self.create_action("about", self.on_about_action)
-        self.create_action("preferences", self.on_preferences_action)
+        self.create_action(
+            "close_window",
+            lambda *_: self.props.active_window.close(),  # pylint: disable=no-member
+            ["<primary>w", "Escape"],
+        )
+        self.create_action("install", self.on_install_action)
+        self.create_action("uninstall", self.on_uninstall_action)
+        self.create_action("open", self.on_open_action)
+
+        # Set these from the CLI
+        self.app_name = "App Name"
+        self.app_icon = None
+        self.path = Path("/test/path/to/app.apk")
+        self.action = "uninstall"
+
+        if self.action == "install":
+            self.app_name = self.path.name
+            self.app_icon = self.create_icon()
 
     def do_activate(self):  # pylint: disable=arguments-differ
         """Called when the application is activated.
@@ -48,27 +68,76 @@ class SideloaderApplication(Adw.Application):
         We raise the application's main window, creating it if
         necessary.
         """
-        win = self.props.active_window  # pylint: disable=no-member
-        if not win:
-            win = SideloaderWindow(application=self)
-        win.present()
 
-    def on_about_action(self, _widget, _):
-        """Callback for the app.about action."""
-        about = Adw.AboutWindow(
-            transient_for=self.props.active_window,  # pylint: disable=no-member
-            application_name="sideloader",
-            application_icon="org.vanillaos.Sideloader",
-            developer_name="kramo",
-            version="0.1.0",
-            developers=["kramo"],
-            copyright="© 2023 kramo",
+        self.win = self.props.active_window  # pylint: disable=no-member
+        if not self.win:
+            self.win = SideloaderWindow(self.app_name, self.app_icon, application=self)
+
+        self.win.bin_main.set_child(
+            self.win.install_status_page
+            if self.action == "install"
+            else self.win.uninstall_status_page
         )
-        about.present()
 
-    def on_preferences_action(self, _widget, _):
-        """Callback for the app.preferences action."""
-        print("app.preferences action activated")
+        self.win.present()
+
+    def on_open_action(self, *_args):
+        pass  # Command for VSO to open the app
+
+    def create_icon(self):
+        # Extract the icon from the .apk/.deb file here
+        return Gtk.Image.new()
+
+    def pulse_progress_bar(self):
+        def pulse():
+            while True:
+                sleep(0.1)
+                self.win.progress_bar.pulse()
+
+        GLib.Thread.new(None, pulse)
+
+    def show_done(self, _pid, _wait_status):
+        if self.action == "install":
+            self.win.done_status_page_install.set_title(
+                _("{} Successfully installed.").format(f'"{self.app_name}"')
+            )
+
+            self.win.bin_main.set_child(self.win.done_status_page_install)
+
+        elif self.action == "uninstall":
+            self.win.done_status_page_uninstall.set_title(
+                _("{} Successfully uninstalled.").format(self.app_name)
+            )
+
+            self.win.bin_main.set_child(self.win.done_status_page_uninstall)
+
+    def on_install_action(self, *_args):
+        self.win.loading_status_page.set_title(
+            _("Installing {}...").format(f'"{self.app_name}"')
+        )
+
+        self.win.bin_main.set_child(self.win.loading_status_page)
+        self.pulse_progress_bar()
+
+        argv = ["sleep", "3"]  # VSO command goes here
+
+        pid = GLib.spawn_async(argv, flags=GLib.SpawnFlags.SEARCH_PATH)[0]
+
+        GLib.child_watch_add(GLib.PRIORITY_DEFAULT, pid, self.show_done)
+
+    def on_uninstall_action(self, *_args):
+        self.win.loading_status_page.set_title(
+            _("Uninstalling {}...").format(self.app_name)
+        )
+
+        self.win.bin_main.set_child(self.win.loading_status_page)
+        self.pulse_progress_bar()
+
+        argv = ["sleep", "3"]  # VSO command goes here
+
+        pid = GLib.spawn_async(argv, flags=GLib.SpawnFlags.SEARCH_PATH)[0]
+
+        GLib.child_watch_add(GLib.PRIORITY_DEFAULT, pid, self.show_done)
 
     def create_action(self, name, callback, shortcuts=None):
         """Add an application action.

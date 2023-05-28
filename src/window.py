@@ -24,5 +24,24 @@ from gi.repository import Adw, Gtk
 class SideloaderWindow(Adw.ApplicationWindow):
     __gtype_name__ = "SideloaderWindow"
 
-    def __init__(self, **kwargs):
+    bin_main = Gtk.Template.Child()
+
+    install_status_page = Gtk.Template.Child()
+    done_status_page_install = Gtk.Template.Child()
+
+    uninstall_status_page = Gtk.Template.Child()
+    done_status_page_uninstall = Gtk.Template.Child()
+
+    loading_status_page = Gtk.Template.Child()
+    progress_bar = Gtk.Template.Child()
+
+    def __init__(self, app_name, app_icon=None, **kwargs):
         super().__init__(**kwargs)
+
+        self.install_status_page.set_title(_("Install {}?").format(f'"{app_name}"'))
+        self.uninstall_status_page.set_title(_("Uninstall {}?").format(app_name))
+
+        if app_icon:
+            self.install_status_page.set_paintable(app_icon.get_paintable())
+        else:
+            self.install_status_page.set_icon_name("package-x-generic-symbolic")
